@@ -33,6 +33,8 @@ struct pid_cache {
 static LIST_HEAD(pid_caches_lh);
 static DEFINE_MUTEX(pid_caches_mutex);
 static struct kmem_cache *pid_ns_cachep;
+/* Write once array, filled from the beginning. */
+static struct kmem_cache *pid_cache[MAX_PID_NS_LEVEL];
 
 /*
  * creates the kmem cache to allocate pids from.

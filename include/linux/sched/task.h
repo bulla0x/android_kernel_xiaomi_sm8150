@@ -30,7 +30,6 @@ struct kernel_clone_args {
 	/* Number of elements in *set_tid */
 	size_t set_tid_size;
 };
-
 /*
  * This serializes "schedule()" and also protects
  * the run-queue from deletions/modifications (but

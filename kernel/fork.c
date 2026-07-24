@@ -1905,6 +1905,7 @@ static __latent_entropy struct task_struct *copy_process(
 		goto bad_fork_cleanup_mm;
 	retval = copy_io(clone_flags, p);
 	if (retval)
+		if (retval < 0)
 		goto bad_fork_cleanup_namespaces;
 	retval = copy_thread_tls(clone_flags, args->stack, args->stack_size, p,
 				 args->tls);
