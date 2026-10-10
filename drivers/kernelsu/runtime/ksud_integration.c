@@ -436,13 +436,15 @@ static bool is_init_rc(struct file *fp)
 static void ksu_apply_init_rc_proxy(struct file *file)
 {
     // we only process the first read
+    // READ_ONCE/WRITE_ONCE: this runs from the read(2) path and can be
+    // entered concurrently on two descriptors of init.rc.
     static bool rc_hooked = false;
-    if (rc_hooked) {
+    if (READ_ONCE(rc_hooked)) {
         // we don't need these kprobe, unregister it!
         stop_init_rc_hook();
         return;
     }
-    rc_hooked = true;
+    WRITE_ONCE(rc_hooked, true);
 
     // now we can sure that the init process is reading
     // `/system/etc/init/init.rc`
@@ -468,7 +470,17 @@ static void ksu_apply_init_rc_proxy(struct file *file)
 
 void ksu_handle_sys_read(unsigned int fd)
 {
-    struct file *file = fget(fd);
+    struct file *file;
+
+    /*
+     * The manual hook in fs/read_write.c calls us for every read(2) for the
+     * lifetime of the boot; stop_init_rc_hook() flips this flag so the
+     * proxy can be torn down again.
+     */
+    if (likely(!ksu_init_rc_hook))
+        return;
+
+    file = fget(fd);
     if (!file) return;
 
     if (is_init_rc(file)) {
@@ -585,7 +597,7 @@ static int sys_execveat_handler_pre(struct kprobe *p, struct pt_regs *regs)
 	struct pt_regs *real_regs = PT_REAL_REGS(regs);
 	// New bionic maps execve to execveat(AT_FDCWD, path, argv, envp, 0)
 	if ((int)PT_REGS_PARM1(real_regs) != AT_FDCWD ||
-	    (int)PT_REGS_SYSCALL_PARM4(real_regs) != 0)
+	    (int)PT_REGS_PARM5(real_regs) != 0)
 		return 0;
 	return ksu_execve_syscall_common(real_regs,
 					 (const char __user **)&PT_REGS_PARM2(real_regs),
@@ -772,6 +784,9 @@ int __maybe_unused ksu_handle_vfs_read(struct file **file_ptr, char __user **buf
                 size_t *count_ptr, loff_t **pos)
 {
     struct file *file = *file_ptr;
+
+    if (likely(!ksu_init_rc_hook))
+        return 0;
 
     if (IS_ERR_OR_NULL(file)) return 0;
 

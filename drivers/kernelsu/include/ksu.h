@@ -11,19 +11,20 @@
 #define EVENT_POST_FS_DATA 1
 #define EVENT_BOOT_COMPLETED 2
 #define EVENT_MODULE_MOUNTED 3
+#define EVENT_SERVICES 4
 
-static inline int startswith(char *s, char *prefix)
+static inline bool startswith(const char *str, const char *prefix)
 {
-	return strncmp(s, prefix, strlen(prefix));
+	return strncmp(str, prefix, strlen(prefix)) == 0;
 }
 
-static inline int endswith(const char *s, const char *t)
+static inline bool endswith(const char *str, const char *suffix)
 {
-	size_t slen = strlen(s);
-	size_t tlen = strlen(t);
-	if (tlen > slen)
-		return 1;
-	return strcmp(s + slen - tlen, t);
+	size_t str_len = strlen(str);
+	size_t suffix_len = strlen(suffix);
+	if (suffix_len > str_len)
+		return false;
+	return !strcmp(str + str_len - suffix_len, suffix);
 }
 
 extern struct cred* ksu_cred;

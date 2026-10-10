@@ -217,6 +217,16 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
 
 	// Check if this is a request to install KSU fd
 	if (magic2 == KSU_INSTALL_MAGIC2) {
+		/*
+		 * Every other command below guards on privilege; the fd install
+		 * did not, so any unprivileged app could hand itself a working
+		 * anon_ksu descriptor (and fingerprint the exact build through
+		 * the always_allow GET_INFO / CHECK_SAFEMODE ioctls).
+		 * Restrict to root, manager, and apps allowed for su.
+		 */
+		if (current_uid().val != 0 && !allowed_for_su())
+			return 0;
+
 		int fd = ksu_install_fd();
 		// downstream: dereference all arg usage!
 		if (copy_to_user((void __user *)*arg, &fd, sizeof(fd))) {

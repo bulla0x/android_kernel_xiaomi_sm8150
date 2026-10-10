@@ -138,6 +138,7 @@ void disable_seccomp(void)
 
 int escape_with_root_profile(void)
 {
+	int ret = 0;
 	struct cred *cred;
     struct root_profile *profile = NULL;
 	struct user_struct *new_user;
@@ -145,16 +146,18 @@ int escape_with_root_profile(void)
 	cred = prepare_creds();
 	if (!cred) {
 		pr_warn("prepare_creds failed!\n");
-		return 0;
+		return -ENOMEM;
 	}
 
 	if (cred->euid.val == 0) {
 		pr_warn("Already root, don't escape!\n");
+		ret = -EALREADY;
 		goto out_abort_creds;
 	}
 
     if (test_thread_flag(TIF_KSU_DISABLE_ESCAPE_WITH_ROOT)) {
         pr_warn("TIF_KSU_DISABLE_ESCAPE_WITH_ROOT found, don't escape!\n");
+        ret = -EPERM;
         goto out_abort_creds;
     }
 
@@ -186,6 +189,7 @@ int escape_with_root_profile(void)
      */
     new_user = alloc_uid(cred->uid);
     if (!new_user) {
+        ret = -ENOMEM;
         goto out_abort_creds;
     }
 
@@ -201,13 +205,13 @@ int escape_with_root_profile(void)
     }
 #endif
 
-    // setup capabilities
-    // we need CAP_DAC_READ_SEARCH becuase `/data/adb/ksud` is not accessible for non root process
-    // we add it here but don't add it to cap_inhertiable, it would be dropped automaticly after exec!
-    u64 cap_for_ksud = profile->capabilities.effective | CAP_DAC_READ_SEARCH;
-    memcpy(&cred->cap_effective, &cap_for_ksud, sizeof(cred->cap_effective));
+    memcpy(&cred->cap_effective, &profile->capabilities.effective, sizeof(cred->cap_effective));
     memcpy(&cred->cap_permitted, &profile->capabilities.effective, sizeof(cred->cap_permitted));
     memcpy(&cred->cap_bset, &profile->capabilities.effective, sizeof(cred->cap_bset));
+    if (profile->uid != 0) {
+        memcpy(&cred->cap_inheritable, &profile->capabilities.effective, sizeof(cred->cap_inheritable));
+        memcpy(&cred->cap_ambient, &profile->capabilities.effective, sizeof(cred->cap_ambient));
+    }
 
     setup_groups(profile, cred);
     setup_selinux(profile->selinux_domain, cred);
@@ -236,7 +240,7 @@ out_abort_creds:
     if (profile)
         ksu_put_root_profile(profile);
     abort_creds(cred);
-	return 0;
+	return ret;
 }
 
 void escape_to_root_for_init(void) {

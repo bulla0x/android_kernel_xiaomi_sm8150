@@ -72,14 +72,14 @@ MDIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 # Check if this is a git repository
 # Try to detect Git repo intelligently
-KSU_GIT_VERSION := 3005
-KSU_GIT_TAG := v3.4.0
+KSU_GIT_VERSION := 3044
+KSU_GIT_TAG := v3.4.1
 KSU_GIT_VERSION_VALID := 1
 
 # Calculate version if git version is available
 ifdef KSU_GIT_VERSION_VALID
 # legacy: keep version derived from commit count, with a +289 offset so
-# the reported ksuver stays in line with the manager versionCode (33294 for v3.4.0)
+# the reported ksuver stays in line with the manager versionCode (33333 for v3.4.1)
 $(eval KSU_VERSION=$(shell expr 30000 + $(KSU_GIT_VERSION) + 289))
 $(info -- KernelSU-Next version: $(KSU_VERSION))
 else

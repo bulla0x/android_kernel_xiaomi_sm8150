@@ -172,6 +172,8 @@ static int apply_kernelsu_rules_fn(void *ptr)
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "getpgid");
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");
     
+    // Return value ignored: the policy is published either way.
+    ksu_policydb_fixup_len(db, "apply_kernelsu_rules");
     return 0;
 }
 
@@ -184,9 +186,15 @@ void apply_kernelsu_rules()
 	}
 
 #ifdef SELINUX_POLICY_INSTEAD_SELINUX_SS
-	struct selinux_policy *pol, *old_pol = selinux_state.policy;
+	struct selinux_policy *pol, *old_pol;
 	mutex_lock(&selinux_state.policy_mutex);
-	pol = ksu_dup_sepolicy(rcu_dereference_protected(old_pol, lockdep_is_held(&selinux_state.policy_mutex)));
+	old_pol = rcu_dereference_protected(selinux_state.policy,
+					    lockdep_is_held(&selinux_state.policy_mutex));
+	if (!old_pol) {
+		pr_err("selinux policy is NULL, skipping rules application\n");
+		goto out_unlock;
+	}
+	pol = ksu_dup_sepolicy(old_pol);
 	if (!pol) {
 		pr_err("failed to dup selinux_policy\n");
 		goto out_unlock;
@@ -572,9 +580,14 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
 
 	mutex_lock(&selinux_state.policy_mutex);
 
-	old_pol = selinux_state.policy;
-	pol = ksu_dup_sepolicy(rcu_dereference_protected(
-		old_pol, lockdep_is_held(&selinux_state.policy_mutex)));
+	/* Read the RCU-protected pointer inside the lock, see apply_kernelsu_rules(). */
+	old_pol = rcu_dereference_protected(selinux_state.policy,
+					    lockdep_is_held(&selinux_state.policy_mutex));
+	if (!old_pol) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
+	pol = ksu_dup_sepolicy(old_pol);
 	if (!pol) {
 		ret = -ENOMEM;
 		goto out_unlock;
@@ -624,6 +637,8 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
 		cmd_index++;
 	}
 
+	// Return value ignored: the policy is published either way.
+	ksu_policydb_fixup_len(db, "handle_sepolicy");
 	rcu_assign_pointer(selinux_state.policy, pol);
 	synchronize_rcu();
 	ksu_destroy_sepolicy(old_pol);
@@ -703,6 +718,8 @@ static int handle_sepolicy_fn(void *data)
 	}
 
 out:
+	// Return value ignored: the policy is published either way.
+	ksu_policydb_fixup_len(db, "handle_sepolicy");
 	*(int *)(ctx->ctx_success_cmd_count) = success_cmd_count;
 	return ret;
 }
