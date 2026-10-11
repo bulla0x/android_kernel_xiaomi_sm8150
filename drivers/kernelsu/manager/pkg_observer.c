@@ -8,6 +8,7 @@
 #include <linux/rculist.h>
 #include <linux/task_work.h>
 #include <linux/version.h>
+#include "compat/kernel_compat.h"
 #include "klog.h" // IWYU pragma: keep
 #include "throne_tracker.h"
 #include "runtime/ksud_boot.h"
