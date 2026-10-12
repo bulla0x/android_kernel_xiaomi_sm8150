@@ -1,17 +1,8 @@
 #ifndef __KSU_H_KERNEL_UMOUNT
 #define __KSU_H_KERNEL_UMOUNT
 
-#include <linux/types.h>
-#include <linux/list.h>
-#include <linux/rwsem.h>
-
 void ksu_kernel_umount_init(void);
 void ksu_kernel_umount_exit(void);
-
-#if !defined(CONFIG_KSU_SUSFS) || !defined(CONFIG_KSU_SUSFS_TRY_UMOUNT)
- // Handler function to be called from setresuid hook
- int ksu_handle_umount(uid_t old_uid, uid_t new_uid);
-#endif
 
 // for the umount list
 struct mount_entry {
@@ -21,5 +12,9 @@ struct mount_entry {
 };
 extern struct list_head mount_list;
 extern struct rw_semaphore mount_list_lock;
+
+#if defined(CONFIG_KSU_SUSFS) && defined(CONFIG_KSU_SUSFS_TRY_UMOUNT)
+void try_umount(const char *mnt, int flags);
+#endif
 
 #endif

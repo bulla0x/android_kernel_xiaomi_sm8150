@@ -1,347 +1,166 @@
-kernelsu-objs := core/init.o
+# NOTE: unity build. single unit.
 
-kernelsu-objs += compat/kernel_compat.o
-kernelsu-objs += feature/kernel_umount.o
-kernelsu-objs += feature/sulog.o
-kernelsu-objs += feature/sucompat.o
+obj-$(CONFIG_KSU) := ksu.o
 
-kernelsu-objs += hook/hook_manager.o
-kernelsu-objs += hook/lsm_hooks.o
-kernelsu-objs += hook/setuid_hook.o
-kernelsu-objs += extras.o
-kernelsu-objs += tiny_sulog.o
+CFLAGS_ksu.o += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
+CFLAGS_ksu.o += -I$(objtree)/security/selinux
+CFLAGS_ksu.o += -I$(srctree)/drivers/kernelsu -I$(srctree)/drivers/kernelsu/include
+ccflags-y += -I$(srctree)/drivers/kernelsu -I$(srctree)/drivers/kernelsu/include
 
-kernelsu-objs += infra/file_wrapper.o
-kernelsu-objs += infra/event_queue.o
-kernelsu-objs += infra/seccomp_cache.o
-kernelsu-objs += infra/su_mount_ns.o
+KDIR := $(KDIR)
+MDIR := $(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
-ifneq ($(CONFIG_KSU_DISABLE_MANAGER),y)
-kernelsu-objs += manager/apk_sign.o
-kernelsu-objs += manager/throne_tracker.o
-kernelsu-objs += manager/pkg_observer.o
+$(info -- KDIR: $(KDIR))
+$(info -- MDIR: $(MDIR))
+
+# compliant to last upstream kernel change as of 0a1f3ff
+CFLAGS_ksu.o += -DKSU_VERSION=32676
+
+KSU_PACKAGE_NAME := me.weishu.kernelsu
+KSU_EXPECTED_SIZE := 0x033b
+KSU_EXPECTED_HASH := c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6
+
+$(info -- KernelSU Manager package name: $(KSU_PACKAGE_NAME))
+$(info -- KernelSU Manager signature size: $(KSU_EXPECTED_SIZE))
+$(info -- KernelSU Manager signature hash: $(KSU_EXPECTED_HASH))
+
+CFLAGS_ksu.o += -DKSU_PACKAGE_NAME=\"$(KSU_PACKAGE_NAME)\"
+CFLAGS_ksu.o += -DEXPECTED_SIZE=$(KSU_EXPECTED_SIZE)
+CFLAGS_ksu.o += -DEXPECTED_HASH=\"$(KSU_EXPECTED_HASH)\"
+
+ifeq ($(shell grep -q "^struct security_operations selinux_ops" $(srctree)/security/selinux/hooks.c; echo $$?),0)
+$(info -- KernelSU/compat: exported selinux_ops found!)
+CFLAGS_ksu.o += -DKSU_HAS_EXPORTED_SELINUX_OPS
 endif
 
-kernelsu-objs += policy/allowlist.o
-kernelsu-objs += policy/app_profile.o
-kernelsu-objs += policy/feature.o
-
-kernelsu-objs += runtime/boot_event.o
-kernelsu-objs += runtime/ksud_integration.o
-
-kernelsu-objs += selinux/selinux.o
-kernelsu-objs += selinux/rules.o
-kernelsu-objs += selinux/sepolicy.o
-
-kernelsu-objs += sulog/event.o
-kernelsu-objs += sulog/fd.o
-
-kernelsu-objs += supercall/dispatch.o
-kernelsu-objs += supercall/perm.o
-kernelsu-objs += supercall/supercall.o
-
-kernelsu-objs += feature/adb_root.o
-
-ifdef KBUILD_EXTMOD
-ifeq ($(CONFIG_KSU_DISABLE_MANAGER),y)
-ccflags-y += -DCONFIG_KSU_DISABLE_MANAGER=1
-endif
-ifeq ($(CONFIG_KSU_DISABLE_POLICY),y)
-ccflags-y += -DCONFIG_KSU_DISABLE_POLICY=1
-endif
-ifeq ($(CONFIG_KSU_DEBUG),y)
-ccflags-y += -DCONFIG_KSU_DEBUG=1
-endif
+ifeq ($(shell grep -q " current_sid(void)" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_COMPAT_HAS_CURRENT_SID
 endif
 
-ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
-ccflags-y += -I$(objtree)/security/selinux -include $(srctree)/include/uapi/asm-generic/errno.h
-
-ifeq ($(filter /%,$(src)),)
-KSU_KERNEL_DIR := $(srctree)/$(src)
-else
-KSU_KERNEL_DIR := $(src)
-endif
-
-ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include
-
-obj-$(CONFIG_KSU) += kernelsu.o
-
-LPATH := /usr/bin/env PATH="$$PATH":/usr/bin:/usr/local/bin
-MDIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-
-# Check if this is a git repository
-# Try to detect Git repo intelligently
-KSU_GIT_VERSION := 3044
-KSU_GIT_TAG := v3.4.1
-KSU_GIT_VERSION_VALID := 1
-
-# Calculate version if git version is available
-ifdef KSU_GIT_VERSION_VALID
-# legacy: keep version derived from commit count, with a +289 offset so
-# the reported ksuver stays in line with the manager versionCode (33333 for v3.4.1)
-$(eval KSU_VERSION=$(shell expr 30000 + $(KSU_GIT_VERSION) + 289))
-$(info -- KernelSU-Next version: $(KSU_VERSION))
-else
-# If there is no .git directory, use default version
-$(warning "KSU_GIT_VERSION not defined! It is better to make KernelSU-Next a git repository!")
-KSU_VERSION_FALLBACK := 1
-$(info -- KernelSU-Next version fallback: $(KSU_VERSION_FALLBACK))
-KSU_VERSION := $(KSU_VERSION_FALLBACK)
-endif
-
-# Allow integrators to pin the reported version (e.g. when backporting
-# onto release branches where the commit count does not match releases)
-ifdef KSU_VERSION_OVERRIDE
-KSU_VERSION := $(KSU_VERSION_OVERRIDE)
-$(info -- KernelSU-Next version override: $(KSU_VERSION))
-endif
-ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
-
-ifdef KSU_GIT_VERSION_VALID
-$(eval KSU_VERSION_TAG=$(KSU_GIT_TAG))
-else
-$(warning "KSU_VERSION_TAG not defined! It is better to make KernelSU-Next a git submodule!")
-KSU_VERSION_TAG_FALLBACK := v0.0.1
-KSU_VERSION_TAG=$(KSU_VERSION_TAG_FALLBACK)
-endif
-
-ifdef KSU_VERSION_TAG_OVERRIDE
-KSU_VERSION_TAG := $(KSU_VERSION_TAG_OVERRIDE)
-endif
-
-$(info -- KernelSU-Next tag: $(KSU_VERSION_TAG))
-ccflags-y += -DKSU_VERSION_TAG=\"$(KSU_VERSION_TAG)\"
-
-ifndef KSU_NEXT_MANAGER_SIZE
-KSU_NEXT_MANAGER_SIZE := 0x3e6
-endif
-
-ifndef KSU_NEXT_MANAGER_HASH
-KSU_NEXT_MANAGER_HASH := 79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7
-endif
-
-ifdef KSU_MANAGER_PACKAGE
-ccflags-y += -DKSU_MANAGER_PACKAGE=\"$(KSU_MANAGER_PACKAGE)\"
-$(info -- KernelSU-Next Manager package name: $(KSU_MANAGER_PACKAGE))
-endif
-
-$(info -- KernelSU-Next Manager signature size: $(KSU_NEXT_MANAGER_SIZE))
-$(info -- KernelSU-Next Manager signature hash: $(KSU_NEXT_MANAGER_HASH))
-
-# RKSU: checks for available hook
-## Logic flipped for HAVE_KSU_HOOK: 0 is success, 1 is failure
-HAVE_KSU_HOOK ?= 1
-
-# Checks hooks state
-ifeq ($(CONFIG_KSU_KPROBES_HOOK), y)
-$(info -- KernelSU-Next: Hook mode: Kprobes)
-ccflags-y += -DKSU_KPROBES_HOOK
-# Let's make it 0, so it would pass.
-HAVE_KSU_HOOK := 0
-endif
-
-ifeq ($(CONFIG_KSU_SYSCALL_TABLE_HOOK), y)
-$(info -- KernelSU-Next: Hook mode: Syscall table patching)
-ccflags-y += -DKSU_SYSCALL_TABLE_HOOK
-HAVE_KSU_HOOK := 0
-kernelsu-objs += hook/patch_memory.o
-kernelsu-objs += hook/syscall_table_hook.o
-kernelsu-objs += infra/symbol_resolver.o
-endif
-
-ifeq ($(CONFIG_KSU_MANUAL_HOOK), y)
-HAVE_KSU_HOOK := $(shell grep -q "ksu_handle_sys_reboot" $(srctree)/kernel/reboot.c && echo 0 || echo 1)
-ifeq ($(HAVE_KSU_HOOK),0)
-$(info -- KernelSU-Next: Hook mode: Manual)
-endif
-endif
-
-ifneq ($(HAVE_KSU_HOOK),0)
-$(error -- KernelSU-Next: No hooks were defined, please integrate manual hooks in your kernel!)
-endif
-
-# some backports
-ifneq ($(shell grep -Eq "^static int can_umount" $(srctree)/fs/namespace.c; echo $$?),0)
-$(info -- KSU_NEXT: adding function 'static int can_umount(const struct path *path, int flags);' to $(srctree)/fs/namespace.c)
-CAN_UMOUNT = static int can_umount(const struct path *path, int flags)\n\
-{\n\t\
-        struct mount *mnt = real_mount(path->mnt);\n\t\
-        if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))\n\t\t\
-                return -EINVAL;\n\t\
-        if (!may_mount())\n\t\t\
-                return -EPERM;\n\t\
-        if (path->dentry != path->mnt->mnt_root)\n\t\t\
-                return -EINVAL;\n\t\
-        if (!check_mnt(mnt))\n\t\t\
-                return -EINVAL;\n\t\
-        if (mnt->mnt.mnt_flags & MNT_LOCKED)\n\t\t\
-                return -EINVAL;\n\t\
-        if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))\n\t\t\
-                return -EPERM;\n\t\
-        return 0;\n\
-}\n
-$(shell sed -i '/^static bool is_mnt_ns_file/i $(CAN_UMOUNT)' $(srctree)/fs/namespace.c;)
-endif
-
-ifneq ($(shell grep -Eq "^int path_umount" $(srctree)/fs/namespace.c; echo $$?),0)
-$(info -- KSU_NEXT: adding function 'int path_umount(struct path *path, int flags);' to $(srctree)/fs/namespace.c)
-PATH_UMOUNT = int path_umount(struct path *path, int flags)\n\
-{\n\t\
-        struct mount *mnt = real_mount(path->mnt);\n\t\
-        int ret;\n\t\
-        ret = can_umount(path, flags);\n\t\
-        if (!ret)\n\t\t\
-                ret = do_umount(mnt, flags);\n\t\
-        dput(path->dentry);\n\t\
-        mntput_no_expire(mnt);\n\t\
-        return ret;\n\
-}\n
-$(shell sed -i '/^static bool is_mnt_ns_file/i $(PATH_UMOUNT)' $(srctree)/fs/namespace.c;)
-endif
-
-ifneq ($(shell grep -Eq "^int path_umount" $(srctree)/fs/internal.h; echo $$?),0)
-$(shell sed -i '/^extern void __init mnt_init/a int path_umount(struct path *path, int flags);' $(srctree)/fs/internal.h;)
-$(info -- KSU_NEXT: adding 'int path_umount(struct path *path, int flags);' to $(srctree)/fs/internal.h)
-endif
-
-ifneq ($(shell grep -q "atomic_t filter_count;" $(srctree)/include/linux/seccomp.h; echo $$?),0)
-$(info -- KSU_NEXT: patching struct seccomp for filter_count)
-$(shell sed -i '/int mode;/a\	atomic_t filter_count;' $(srctree)/include/linux/seccomp.h)
-$(shell sed -i '/#include <linux\/thread_info.h>/a\#include <linux/atomic.h>' $(srctree)/include/linux/seccomp.h)
-endif
-
-# security/selinux backports
-ifneq ($(shell grep -q "selinux_inode(inode)" $(srctree)/security/selinux/hooks.c; echo $$?),0)
-$(info -- KSU_NEXT: patching selinux/hooks.c for selinux_inode)
-$(shell sed -i 's/struct inode_security_struct \*isec = inode->i_security/struct inode_security_struct *isec = selinux_inode(inode)/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/return inode->i_security/return selinux_inode(inode)/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/return inode->i_security/return selinux_inode(inode)/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/\bisec = inode->i_security;/isec = selinux_inode(inode);/' $(srctree)/security/selinux/hooks.c)
-endif
-
-ifneq ($(shell grep -q "selinux_cred" $(srctree)/security/selinux/hooks.c; echo $$?),0)
-$(info -- KSU_NEXT: patching selinux/hooks.c for selinux_cred)
-$(shell sed -i 's/tsec = cred->security;/tsec = selinux_cred(cred);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/const struct task_security_struct \*tsec = cred->security;/const struct task_security_struct *tsec = selinux_cred(cred);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/const struct task_security_struct \*tsec = current_security();/const struct task_security_struct *tsec = selinux_cred(current_cred());/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/rc = selinux_determine_inode_label(current_security())/rc = selinux_determine_inode_label(selinux_cred(current_cred()))/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/old_tsec = current_security();/old_tsec = selinux_cred(current_cred());/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/new_tsec = bprm->cred->security;/new_tsec = selinux_cred(bprm->cred);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/rc = selinux_determine_inode_label(old->security)/rc = selinux_determine_inode_label(selinux_cred(old))/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/tsec = new->security;/tsec = selinux_cred(new);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/tsec = new_creds->security;/tsec = selinux_cred(new_creds);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/old_tsec = old->security;/old_tsec = selinux_cred(old);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/const struct task_security_struct \*old_tsec = old->security;/const struct task_security_struct *old_tsec = selinux_cred(old);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/struct task_security_struct \*tsec = new->security;/struct task_security_struct *tsec = selinux_cred(new);/g' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/__tsec = current_security();/__tsec = selinux_cred(current_cred());/' $(srctree)/security/selinux/hooks.c)
-$(shell sed -i 's/__tsec = __task_cred(p)->security;/__tsec = selinux_cred(__task_cred(p));/' $(srctree)/security/selinux/hooks.c)
-endif
-
-ifneq ($(shell grep -q "selinux_inode(inode)" $(srctree)/security/selinux/selinuxfs.c; echo $$?),0)
-$(info -- KSU_NEXT: patching selinux/selinuxfs.c for selinux_inode)
-$(shell sed -i 's/(struct inode_security_struct \*)inode->i_security/selinux_inode(inode)/g' $(srctree)/security/selinux/selinuxfs.c)
-endif
-
-ifneq ($(shell grep -q "selinux_cred" $(srctree)/security/selinux/xfrm.c; echo $$?),0)
-$(info -- KSU_NEXT: patching selinux/xfrm.c for selinux_cred)
-$(shell sed -i 's/const struct task_security_struct \*tsec = current_security();/const struct task_security_struct *tsec = selinux_cred(current_cred());/g' $(srctree)/security/selinux/xfrm.c)
-endif
-
-ifneq ($(shell grep -q "selinux_inode" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
-$(info -- KSU_NEXT: patching selinux/include/objsec.h for selinux_inode)
-$(shell sed -i '/#endif \/\* _SELINUX_OBJSEC_H_ \*\//i\static inline struct inode_security_struct *selinux_inode(\n\t\t\t\t\t\tconst struct inode *inode)\n{\n\treturn inode->i_security;\n}\n' $(srctree)/security/selinux/include/objsec.h)
-endif
-
-ifneq ($(shell grep -q "task_security_struct\s\+\*selinux_cred" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
-$(info -- KSU_NEXT: patching selinux/include/objsec.h for selinux_cred)
-$(shell sed -i '/#endif \/\* _SELINUX_OBJSEC_H_ \*\//i\static inline struct task_security_struct *selinux_cred(const struct cred *cred)\n{\n\treturn cred->security;\n}\n' $(srctree)/security/selinux/include/objsec.h)
-endif
-
-# see security_delete_hooks
-ifeq ($(shell grep -A5 "^struct security_hook_list" $(srctree)/include/linux/lsm_hooks.h 2>/dev/null | grep -q "struct hlist_node" 2>/dev/null; echo $$?),0)
-$(info -- KSU_NEXT: security_hook_list - hlist_node found!)
-ccflags-y += -DKSU_COMPAT_SECURITY_DELETE_HOOKS_HLIST
-endif
-
-# SELinux drivers check
-ifeq ($(shell grep -q "current_sid(void)" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
-ccflags-y += -DKSU_COMPAT_HAS_CURRENT_SID
-endif
 ifeq ($(shell grep -q "struct selinux_state " $(srctree)/security/selinux/include/security.h; echo $$?),0)
-ccflags-y += -DKSU_COMPAT_USE_SELINUX_STATE
+CFLAGS_ksu.o += -DKSU_COMPAT_HAS_SELINUX_STATE
 endif
+
+# UL, look for iterate_dir on ‎fs/readdir.c
+ifeq ($(shell grep -q "^int iterate_dir" $(srctree)/fs/readdir.c 2>/dev/null; echo $$?),0)
+$(info -- KernelSU/compat: iterate_dir found!)
+CFLAGS_ksu.o += -DKSU_HAS_ITERATE_DIR
+endif
+
+ifeq ($(shell grep -q "struct type_datum \*\*type_val_to_struct;" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_TYPE_VAL_TO_STRUCT
+endif
+
+# half-assed-backport from 5.1
+ifeq ($(shell grep -q "struct type_datum \*\*type_val_to_struct_array;" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
+CFLAGS_ksu.o += -DKSU_TYPE_VAL_TO_STRUCT_ARRAY
+endif
+
 ifeq ($(shell grep -q "^DEFINE_RWLOCK(policy_rwlock);" $(srctree)/security/selinux/ss/services.c; echo $$?),0)
-ccflags-y += -DKSU_COMPAT_HAS_EXPORTED_POLICY_RWLOCK
-endif
-ifeq ($(shell grep -q "cpus_ptr;" $(srctree)/include/linux/sched.h; echo $$?),0)
-ccflags-y += -DKSU_COMPAT_HAS_BACKPORTED_CPUS_PTR
-endif
-ifeq ($(shell grep -q "struct pid \*task_pgrp" $(srctree)/include/linux/sched.h; echo $$?),0)
-ccflags-y += -DKSU_COMPAT_HAS_TASK_PGRP_FUNC
+$(info -- KernelSU/compat: exported policy_rwlock found!)
+CFLAGS_ksu.o += -DKSU_COMPAT_HAS_EXPORTED_POLICY_RWLOCK
 endif
 
-# fallthrough check for allowlist v2
-ifneq ($(shell [ -f $(srctree)/include/linux/compiler_attributes.h ] && grep -q "define fallthrough" $(srctree)/include/linux/compiler_attributes.h; echo $$?),0)
-$(info -- KSU_NEXT: fallthrough in compiler_attributes.h not found)
-ccflags-y += -DKSU_ALLOWLIST_DOES_NOT_HAVE_FALLTHROUGH
+# branch link hook vfs_statx, this newer version uses struct filename
+ifeq ($(shell grep "int vfs_statx" $(srctree)/fs/stat.c 2>/dev/null | grep -q "struct filename" 2>/dev/null; echo $$?),0)
+# $(info -- KernelSU/compat: vfs_statx has struct filename argument!)
+CFLAGS_ksu.o += -DKSU_HAS_VFS_STATX2
 endif
 
-# Handle optional backports
-ifeq ($(shell grep -q "strncpy_from_user_nofault" $(srctree)/include/linux/uaccess.h; echo $$?),0)
-ccflags-y += -DKSU_OPTIONAL_STRNCPY
+# branch link hook, do_faccessat
+ifeq ($(shell grep "long do_faccessat" $(srctree)/fs/open.c 2>/dev/null | grep -q "flags" 2>/dev/null; echo $$?),0)
+# $(info -- KernelSU/compat: do_faccessat has flags argument!)
+CFLAGS_ksu.o += -DKSU_HAS_FACCESSAT2
 endif
 
-ifeq ($(shell grep -q "ssize_t kernel_read" $(srctree)/fs/read_write.c; echo $$?),0)
-ccflags-y += -DKSU_OPTIONAL_KERNEL_READ
+# UL, look for read_iter on f_op struct
+ifeq ($(shell grep -q "read_iter" $(srctree)/include/linux/fs.h 2>/dev/null; echo $$?),0)
+$(info -- KernelSU/compat: f_op->read_iter found!)
+CFLAGS_ksu.o += -DKSU_HAS_FOP_READ_ITER
 endif
 
-ifeq ($(shell grep "ssize_t kernel_write" $(srctree)/fs/read_write.c | grep -q "const void" ; echo $$?),0)
-ccflags-y += -DKSU_OPTIONAL_KERNEL_WRITE
+CFLAGS_ksu.o += $(call cc-option, -Wno-declaration-after-statement)
+CFLAGS_ksu.o += $(call cc-option, -Wno-implicit-function-declaration)
+CFLAGS_ksu.o += $(call cc-option, -Wno-missing-prototypes)
+CFLAGS_ksu.o += $(call cc-option, -Wno-strict-prototypes)
+CFLAGS_ksu.o += $(call cc-option, -Wno-int-conversion)
+CFLAGS_ksu.o += $(call cc-option, -Wno-int-to-pointer-cast)
+CFLAGS_ksu.o += $(call cc-option, -Wno-pointer-to-int-cast)
+CFLAGS_ksu.o += $(call cc-option, -Wno-unused-variable)
+CFLAGS_ksu.o += $(call cc-option, -Wno-unused-function)
+CFLAGS_ksu.o += $(call cc-option, -Wno-unused-label)
+CFLAGS_ksu.o += $(call cc-option, -Wno-format)
+CFLAGS_ksu.o += $(call cc-option, -Wno-macro-redefined)
+CFLAGS_ksu.o += $(call cc-option, -Wno-incompatible-pointer-types-discards-qualifiers)
+CFLAGS_ksu.o += $(call cc-option, -Wno-discarded-qualifiers)
+CFLAGS_ksu.o += $(call cc-option, -Wno-deprecated-octal-literals)
+
+# dont be too strict
+CFLAGS_REMOVE_ksu.o += -Werror
+
+# so we can see stack use atleast, as we disable all stack safety here
+CFLAGS_ksu.o += $(call cc-option, -Wframe-larger-than=1024)
+
+# to make sure we can use builtins
+CFLAGS_REMOVE_ksu.o += -fno-builtin
+
+# Os to O2, we dont care for anything else. O3 vs O2 codegen on hotpath is same.
+ifeq ($(CONFIG_CC_OPTIMIZE_FOR_SIZE),y)
+CFLAGS_REMOVE_ksu.o += -Oz
+CFLAGS_REMOVE_ksu.o += -Os
+CFLAGS_ksu.o += -O2
 endif
 
-ifeq ($(shell grep -q "int\s\+path_mount" $(srctree)/fs/namespace.c; echo $$?),0)
-ccflags-y += -DKSU_HAS_PATH_MOUNT
+# attempt to enable gnu11 up to gnu2y
+# we skip gnu2x here due to its inconsistency
+CFLAGS_ksu.o += $(call cc-option, -std=gnu11)
+CFLAGS_ksu.o += $(call cc-option, -std=gnu17)
+CFLAGS_ksu.o += $(call cc-option, -std=gnu23)
+CFLAGS_ksu.o += $(call cc-option, -std=gnu2y)
+
+#ifeq ($(shell $(CC) -v 2>&1 | grep -q 'clang'; echo $$?),0)
+# $(info -- KernelSU/CC: clang!)
+#endif
+
+# always inline atomics
+# clang and gcc CAN try to drop a runtime C11 atomics detector
+# https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AArch64/atomic-ops.ll
+# however this is problematic to us as those cannot be linked to the kernel (e.g. __aarch64_cas4_acq, __aarch64_cas4_rel)
+# so for LKM they just get plain ARMv8.0 atomics, not LSE / LSE2, even when the device is capable of LSE.
+ifeq ($(CONFIG_ARM64),y)
+CFLAGS_ksu.o += $(call cc-option, -mno-outline-atomics)
 endif
 
-ifeq ($(shell grep -q "int\s\+path_umount" $(srctree)/fs/namespace.c; echo $$?),0)
-ccflags-y += -DKSU_HAS_PATH_UMOUNT
-endif
+# Optional: for LKM users, I recommend users to build it themselves with optimizations.
+# you can get optimized codegen especially around atomics.
+# hint: decode your own /proc/cpuinfo and check it here https://github.com/llvm/llvm-project/blob/main/llvm/lib/TargetParser/Host.cpp
+# comment it out and put your cpu / arch here
+# CFLAGS_ksu.o += -mcpu=cortex-a76 -mtune=cortex-a76
 
-# some old kernel backport this, let's check if put_seccomp_filter still exist
-ifneq ($(shell grep -wq "put_seccomp_filter" $(srctree)/kernel/seccomp.c $(srctree)/include/linux/seccomp.h; echo $$?),0)
-ifeq ($(shell grep -wq "seccomp_filter_release" $(srctree)/kernel/seccomp.c $(srctree)/include/linux/seccomp.h; echo $$?),0)
-ccflags-y += -DKSU_OPTIONAL_SECCOMP_FILTER_RELEASE
-endif
-endif
+ifneq ($(CONFIG_KSU_DEBUG),y)
+# strip, remove tracing / profiling
+# comment out if proper backtrace is needed
+CFLAGS_ksu.o += -g0 -fno-unwind-tables -fno-asynchronous-unwind-tables -fomit-frame-pointer
+CFLAGS_ksu.o += $(call cc-option, -momit-leaf-frame-pointer)
 
-ifeq ($(shell grep -q "security_inode_init_security_anon" $(srctree)/include/linux/security.h; echo $$?),0)
-ccflags-y += -DKSU_COMPAT_HAS_INIT_SEC_ANON
-endif
+# no profiling
+CFLAGS_REMOVE_ksu.o += $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_ksu.o += -pg
 
-# Checks Samsung
-ifeq ($(shell grep -q "CONFIG_KDP_CRED" $(srctree)/kernel/cred.c; echo $$?),0)
-ccflags-y += -DSAMSUNG_UH_DRIVER_EXIST
-endif
+# no need for stack init
+CFLAGS_REMOVE_ksu.o += -ftrivial-auto-var-init=pattern
+CFLAGS_REMOVE_ksu.o += -ftrivial-auto-var-init=zero
+CFLAGS_REMOVE_ksu.o += -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
 
-ifeq ($(shell grep -q "SEC_SELINUX_PORTING_COMMON" $(srctree)/security/selinux/avc.c; echo $$?),0)
-ccflags-y += -DSAMSUNG_SELINUX_PORTING
-endif
+# if cflags can be macro'd, this will be called 'TRUST_ME'
+CFLAGS_ksu.o += -fno-stack-protector -fno-stack-check
+CFLAGS_REMOVE_ksu.o += -fsanitize=shadow-call-stack
+endif # CONFIG_KSU_DEBUG
 
-ccflags-y += -DEXPECTED_MANAGER_SIZE=$(KSU_NEXT_MANAGER_SIZE)
-ccflags-y += -DEXPECTED_MANAGER_HASH=\"$(KSU_NEXT_MANAGER_HASH)\"
-
-ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes
-ccflags-y += -Wno-declaration-after-statement -Wno-unused-function -Wno-unused-variable
-
-## For susfs stuff ##
-ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)
-$(eval SUSFS_VERSION=$(shell cat $(srctree)/include/linux/susfs.h | grep -E '^#define SUSFS_VERSION' | cut -d' ' -f3 | sed 's/"//g'))
-$(info )
-$(info -- SUSFS_VERSION: $(SUSFS_VERSION))
-else
-$(info -- You have not integrated susfs in your kernel yet.)
-$(info -- Read: https://gitlab.com/simonpunk/susfs4ksu)
-endif
+# Native fallback targets matching the traditional out-of-tree build method
+all:
+	$(MAKE) -C $(KDIR) M=$(MDIR) modules
+clean:
+	$(MAKE) -C $(KDIR) M=$(MDIR) clean
 
 # Keep a new line here!! Because someone may append config
