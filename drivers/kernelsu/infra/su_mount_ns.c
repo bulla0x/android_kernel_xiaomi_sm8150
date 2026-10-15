@@ -28,9 +28,11 @@ static void ksu_mnt_ns_global(void)
 		pwd_path = NULL;
 	}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
-try_setns:
+try_setns:;
+	struct path ns_path;
+	long ret;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0)
 	rcu_read_lock();
 	// &init_task is not init, but swapper/idle, which forks the init process
 	// so we need find init process
@@ -38,39 +40,45 @@ try_setns:
 	if (unlikely(!pid_struct)) {
 		rcu_read_unlock();
 		pr_warn("failed to find pid_struct for PID 1\n");
-		goto out;
+		goto fallback_proc;
 	}
 
 	struct task_struct *pid1_task = get_pid_task(pid_struct, PIDTYPE_PID);
 	rcu_read_unlock();
 	if (unlikely(!pid1_task)) {
 		pr_warn("failed to get task_struct for PID 1\n");
-		goto out;
+		goto fallback_proc;
 	}
-	struct path ns_path;
-	long ret = ns_get_path(&ns_path, pid1_task, &mntns_operations);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+	ret = ns_get_path(&ns_path, pid1_task, &mntns_operations);
+#else
+	void *err = ns_get_path(&ns_path, pid1_task, &mntns_operations);
+	ret = PTR_ERR_OR_ZERO(err);
+#endif
 	put_task_struct(pid1_task);
 	if (ret) {
 		pr_warn("failed get path for init mount namespace: %ld\n", ret);
-		goto out;
+		goto fallback_proc;
 	}
-#else
-try_setns:;
-	// on UL kernels we can try to just feed it with struct path of /proc/1/ns/mnt
-	// we do NOT have ns_get_path. if it works, GOOD. if it doesn't I don't care.
-	struct path ns_path;
-	const struct cred *saved = override_creds(ksu_cred);
+	goto have_path;
 
-	// make sure to LOOKUP_FOLLOW
-	// /proc/1/ns/mnt -> 'mnt:[505034]'
-	long ret = kern_path("/proc/1/ns/mnt", LOOKUP_FOLLOW, &ns_path);
-	if (ret) {
-		revert_creds(saved);
-		pr_warn("kern_path /proc/1/ns/mnt fail! ret: %d\n", ret);
-		goto out;
-	}
-	revert_creds(saved);
+fallback_proc:;
 #endif
+	{
+		const struct cred *saved = override_creds(ksu_cred);
+
+		// make sure to LOOKUP_FOLLOW
+		// /proc/1/ns/mnt -> 'mnt:[505034]'
+		ret = kern_path("/proc/1/ns/mnt", LOOKUP_FOLLOW, &ns_path);
+		if (ret) {
+			revert_creds(saved);
+			pr_warn("kern_path /proc/1/ns/mnt fail! ret: %ld\n", ret);
+			goto out;
+		}
+		revert_creds(saved);
+	}
+
+have_path:
 
 	struct file *ns_file = dentry_open(&ns_path, O_RDONLY, ksu_cred);
 

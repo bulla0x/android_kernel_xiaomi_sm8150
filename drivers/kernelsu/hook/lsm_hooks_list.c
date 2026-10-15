@@ -48,7 +48,6 @@ static __nocfi int ksu_file_permission(struct file *file, int mask)
 	return file_permission_fn(file, mask);
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
 static int (*bprm_set_creds_fn)(struct linux_binprm *bprm) __read_mostly = nullptr;
 static __nocfi int ksu_bprm_set_creds(struct linux_binprm *bprm)
 {
@@ -70,7 +69,6 @@ static __nocfi int ksu_bprm_set_creds(struct linux_binprm *bprm)
 capability_fn:
 	return bprm_set_creds_fn(bprm);
 }
-#endif
 
 static void *setprocattr_fn __read_mostly = nullptr;
 static __nocfi int ksu_setprocattr_new(const char *name, void *value, size_t size)
@@ -286,7 +284,6 @@ loop_start:
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
 static int ksu_restore_bprm_set_creds(void *data)
 {
 	set_user_nice(current, 19); // low prio
@@ -301,7 +298,6 @@ loop_start:
 	LSM_HACK_RESTORE(bprm_set_creds);
 	return 0;
 }
-#endif
 
 static __init void ksu_lsm_hook_init(void)
 {
@@ -318,10 +314,8 @@ static __init void ksu_lsm_hook_init(void)
 	kthread_run(ksu_restore_file_permission, NULL, "kthread");
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
 	LSM_HACK_INIT(bprm_set_creds, ksu_bprm_set_creds);
 	kthread_run(ksu_restore_bprm_set_creds, NULL, "kthread");
-#endif
 
 }
 
