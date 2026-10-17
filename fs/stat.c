@@ -21,6 +21,14 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_KSU
+extern int ksu_handle_stat(int *, const char __user **, int *);
+#if !defined(CONFIG_KSU_KPROBES_KSUD)
+extern void ksu_handle_newfstat_ret(unsigned int *, struct stat __user **);
+extern void ksu_handle_fstat64_ret(unsigned long *, struct stat64 __user **);
+#endif
+#endif
+
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
  * @inode: Inode to use as the source
@@ -365,7 +373,6 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 	int error;
 
 #ifdef CONFIG_KSU
-	extern int ksu_handle_stat(int *, const char __user **, int *);
 	ksu_handle_stat(&dfd, &filename, &flag);
 #endif
 
@@ -385,7 +392,6 @@ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
 		error = cp_new_stat(&stat, statbuf);
 
 #if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_KSUD)
-	extern void ksu_handle_newfstat_ret(unsigned int *, struct stat __user **);
 	ksu_handle_newfstat_ret(&fd, &statbuf);
 #endif
 
@@ -517,7 +523,6 @@ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
 		error = cp_new_stat64(&stat, statbuf);
 
 #if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_KSUD)
-	extern void ksu_handle_fstat64_ret(unsigned long *, struct stat64 __user **);
 	ksu_handle_fstat64_ret(&fd, &statbuf);
 #endif
 
@@ -531,7 +536,6 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
 	int error;
 
 #ifdef CONFIG_KSU
-	extern int ksu_handle_stat(int *, const char __user **, int *);
 	ksu_handle_stat(&dfd, &filename, &flag);
 #endif
 
