@@ -5,6 +5,10 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/thread_info.h>
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/namei.h>
+#include <linux/susfs.h>
+#endif
 
 #include "uapi/supercall.h"
 #include "supercall/internal.h"
@@ -135,6 +139,9 @@ static int do_report_event(void __user *arg)
 			} else {
 				pr_info("boot_complete triggered\n");
 				on_boot_completed();
+#ifdef CONFIG_KSU_SUSFS
+				susfs_start_sdcard_monitor_fn();
+#endif
 			}
 		}
 		break;
@@ -471,7 +478,6 @@ static int do_get_wrapper_fd(void __user *arg) {
 
 static int do_manage_mark(void __user *arg)
 {
-#ifdef KSU_KPROBES_HOOK
 	struct ksu_manage_mark_cmd cmd;
 	int ret = 0;
 
@@ -480,6 +486,7 @@ static int do_manage_mark(void __user *arg)
 		return -EFAULT;
 	}
 
+#ifdef KSU_KPROBES_HOOK
 	switch (cmd.operation) {
 	case KSU_MARK_GET: {
 		// Get task mark status
@@ -534,9 +541,24 @@ static int do_manage_mark(void __user *arg)
 
 	return 0;
 #else
+#ifdef CONFIG_KSU_SUSFS
+	if (susfs_is_current_proc_umounted()) {
+		ret = 0; // SYSCALL_TRACEPOINT is NOT flagged
+	} else {
+		ret = 1; // SYSCALL_TRACEPOINT is flagged
+	}
+	pr_info("manage_mark: ret for pid %d: %d\n", cmd.pid, ret);
+	cmd.result = (u32)ret;
+	if (copy_to_user(arg, &cmd, sizeof(cmd))) {
+		pr_err("manage_mark: copy_to_user failed\n");
+		return -EFAULT;
+	}
+	return 0;
+#else
 	// We don't care, just return -ENOTSUPP
 	pr_warn("manage_mark: this supercalls is not implemented for manual hook.\n");
 	return -ENOTSUPP;
+#endif
 #endif
 }
 
