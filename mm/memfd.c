@@ -19,6 +19,9 @@
 #include <linux/shmem_fs.h>
 #include <linux/memfd.h>
 #include <uapi/linux/memfd.h>
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs.h>
+#endif
 
 /*
  * We need a tag: a new tag would expand every xa_node by 8 bytes,
@@ -299,6 +302,13 @@ SYSCALL_DEFINE2(memfd_create,
 		error = -EFAULT;
 		goto err_name;
 	}
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MEMFD
+	if (susfs_sus_memfd(name)) {
+		error = -EFAULT;
+		goto err_name;
+	}
+#endif
 
 	/* terminating-zero may have changed after strnlen_user() returned */
 	if (name[len + MFD_NAME_PREFIX_LEN - 1]) {
