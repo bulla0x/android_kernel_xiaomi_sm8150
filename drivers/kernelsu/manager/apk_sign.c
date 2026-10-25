@@ -350,10 +350,7 @@ int get_pkg_from_apk_dir_path(char *pkg, const char *path)
 		return -1;
 
 	const char *last_hyphen = strchr(last_slash, '-');
-	if (!last_hyphen)
-		return -1;
-
-	int pkg_len = last_hyphen - last_slash - 1;
+	int pkg_len = last_hyphen ? (last_hyphen - last_slash - 1) : strlen(last_slash + 1);
 	if (pkg_len >= KSU_MAX_PACKAGE_NAME || pkg_len <= 0)
 		return -1;
 
@@ -364,7 +361,26 @@ int get_pkg_from_apk_dir_path(char *pkg, const char *path)
 	return 0;
 }
 
+#ifndef EXPECTED_MANAGER_SIZE_OFFICIAL
+#define EXPECTED_MANAGER_SIZE_OFFICIAL 0x33b
+#endif
+#ifndef EXPECTED_MANAGER_HASH_OFFICIAL
+#define EXPECTED_MANAGER_HASH_OFFICIAL "c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6"
+#endif
+#ifndef EXPECTED_MANAGER_SIZE_DEBUG
+#define EXPECTED_MANAGER_SIZE_DEBUG 0x372
+#endif
+#ifndef EXPECTED_MANAGER_HASH_DEBUG
+#define EXPECTED_MANAGER_HASH_DEBUG "1e5058ec4319c59346d0a790510526012bf8b31a575a7c50a1e0952d7593c1f2"
+#endif
+
 bool is_manager_apk(char *path)
 {
-	return check_v2_signature(path, EXPECTED_MANAGER_SIZE, EXPECTED_MANAGER_HASH);
+	if (check_v2_signature(path, EXPECTED_MANAGER_SIZE, EXPECTED_MANAGER_HASH))
+		return true;
+	if (check_v2_signature(path, EXPECTED_MANAGER_SIZE_OFFICIAL, EXPECTED_MANAGER_HASH_OFFICIAL))
+		return true;
+	if (check_v2_signature(path, EXPECTED_MANAGER_SIZE_DEBUG, EXPECTED_MANAGER_HASH_DEBUG))
+		return true;
+	return false;
 }
