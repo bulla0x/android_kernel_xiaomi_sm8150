@@ -43,6 +43,7 @@
 #include "ksud_boot.h"
 #include "feature/selinux_hide.h"
 #include "selinux/selinux.h"
+#include "policy/feature.h"
 #include "compat/kernel_compat.h"
 
 static const char KERNEL_SU_RC[] =
@@ -169,10 +170,9 @@ static struct work_struct __maybe_unused stop_init_rc_hook_work;
 static struct work_struct __maybe_unused stop_execve_hook_work;
 static struct work_struct __maybe_unused stop_input_hook_work;
 static DECLARE_COMPLETION(stop_input_hook_work_complete);
-#endif
-// Read by the manual-hook read paths (ksu_handle_sys_read/ksu_handle_vfs_read),
-// which are built in every configuration.
+#else
 bool ksu_init_rc_hook __read_mostly = true;
+#endif
 
 // These are referenced directly from patched kernel sources (manual hook
 // integration points), so they must exist in every build configuration
@@ -270,6 +270,7 @@ static void ksu_initialize_selinux_tw_func(struct callback_head *cb)
 {
 	ksu_selinux_hide_handle_second_stage();
 	apply_kernelsu_rules();
+	ksu_feature_apply_forced();
 	cache_sid();
 	setup_ksu_cred();
 	kfree(cb);

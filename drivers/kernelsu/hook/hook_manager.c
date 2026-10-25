@@ -83,11 +83,11 @@ static void ksu_mark_running_process_locked()
 		if (ksu_root_process || is_zygote_process  || is_shell || is_init
 			|| ksu_is_allow_uid(uid)) {
 			ksu_set_task_tracepoint_flag(t);
-			pr_debug("hook_manager: mark process: pid:%d, uid: %d, comm:%s\n",
+			pr_info("hook_manager: mark process: pid:%d, uid: %d, comm:%s\n",
 					t->pid, uid, t->comm);
 		} else {
 			ksu_clear_task_tracepoint_flag(t);
-			pr_debug("hook_manager: unmark process: pid:%d, uid: %d, comm:%s\n",
+			pr_info("hook_manager: unmark process: pid:%d, uid: %d, comm:%s\n",
 					t->pid, uid, t->comm);
 		}
 		put_cred(cred);
@@ -156,7 +156,7 @@ int ksu_set_task_mark(pid_t pid, bool mark)
 			pr_info("hook_manager: marked task pid=%d comm=%s\n", pid, task->comm);
 		} else {
 			ksu_clear_task_tracepoint_flag(task);
-			pr_debug("hook_manager: unmarked task pid=%d comm=%s\n", pid, task->comm);
+			pr_info("hook_manager: unmarked task pid=%d comm=%s\n", pid, task->comm);
 		}
 		put_task_struct(task);
 		ret = 0;
@@ -296,7 +296,7 @@ int ksu_handle_init_mark_tracker(const char __user **filename_user)
 		escape_to_root_for_init();
 	} else if (likely(strstr(path, "/app_process") == NULL && strstr(path, "/adbd") == NULL &&
 			  strstr(path, "/stub_zygote") == NULL)) {
-		pr_debug("hook_manager: unmark %d exec %s\n", current->pid, path);
+		pr_info("hook_manager: unmark %d exec %s\n", current->pid, path);
 		ksu_clear_task_tracepoint_flag_if_needed(current);
 	}
 
